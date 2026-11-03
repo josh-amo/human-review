@@ -54,6 +54,16 @@ Keep the server running. For a PR, starting the viewer creates or reuses its exa
 
 The viewer saves personal progress, notes, expanded sections, and reading position to `state.json`. After regenerating a guide, sections with changed content or mapped files require rereading; notes remain. Full diffs retain every captured textual hunk, including generated and supporting changes. Binary and metadata-only changes remain listed with their available Git diff metadata. Source and diff line numbers link to VS Code. Each editor target is verified against the checkout at click time; a mismatch opens the exact base/head snapshot with an explicit label.
 
+## Questions and review comments
+
+The real viewer has hover `+` actions on diff rows. **Ask agent** is available for PRs, branches, and every working-tree mode; section headers, explanation blocks, and inline annotations also offer questions. The composer previews the exact selected source and nearby explanation. Questions are queued to the launching Codex chat using `codex queue`; they are not answered in a separate hidden session. A busy chat processes the message when ready.
+
+The server binds to `CODEX_THREAD_ID` (or `CODEX_SESSION_ID`) at launch. If launching outside a Codex chat, use `serve <review-directory> --thread-id <existing-chat-UUID>`. Use only the intended existing chat, never guess another destination or create a new chat automatically. When no destination is bound, the viewer explains how to relaunch rather than pretending a message was sent.
+
+PR reviews additionally offer **Add PR comment**. Comments and the optional review summary are local drafts in `review-actions.json`; refreshing or restarting retains them. Shift-click another `+` on the same file and side to select a range. GitHub comments must fit one captured diff hunk. Removed lines are attached to the left/base side, and added/context lines to the right/head side.
+
+Only the human's separate **Submit review** confirmation publishes the drafts as one GitHub COMMENT review. Do not submit test comments to a real PR or publish the human's drafts as part of preparing a guide. A changed or closed PR blocks submission without discarding drafts. Uncertain network results are reconciled against GitHub before any further action; the viewer does not blindly retry the POST. Authentication failures are surfaced without alternative credentials or workarounds.
+
 ## PR checkouts and cleanup
 
 PR viewers reuse a clean existing worktree at the exact captured head commit, or create a detached worktree inside the review directory. A matching branch name is insufficient. Dirty, locked, missing, or differently pinned worktrees are left alone. Worktrees owned by another review are not borrowed, so one review cannot remove another's code checkout. Local branch and working-tree reviews use the existing checkout without creating another worktree. Current PR code opens in the full worktree; base/deleted lines use captured base source.

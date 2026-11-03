@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 import subprocess
 import worktrees
+from review_actions import ReviewActions, GitHubError
 
 spec = importlib.util.spec_from_file_location("review", Path(__file__).with_name("review.py"))
 review = importlib.util.module_from_spec(spec)
@@ -328,6 +329,144 @@ class ReviewTest(unittest.TestCase):
             removed = worktrees.cleanup_review(self.out, apply=True)
         self.assertTrue(removed[0]["removed"], removed)
         self.assertFalse(checkout.exists())
+
+    def review_actions(self, mode="pr"):
+        snapshot = self.prepare_pr()
+        snapshot["mode"] = mode
+        snapshot["metadata"] = {"url": "https://github.com/example/project/pull/42"} if mode == "pr" else None
+        guide = self.guide(snapshot)
+        guide["sections"][0]["intro"] = "Explain the changed behavior."
+        return ReviewActions(snapshot, guide, self.out, "00000000-0000-4000-8000-000000000001")
+
+    def test_chat_context_and_queue_work_without_a_pr(self):
+        for mode in ("all", "branch", "staged", "unstaged"):
+            with self.subTest(mode=mode):
+                actions = self.review_actions(mode)
+                self.assertIsNone(actions.info()["pr"])
+                request = {"question": "Why did this change?", "sectionId": "story", "blockIndex": 0,
+                           "selection": {"path": "story.txt", "side": "head", "start": 1, "end": 2}}
+                with patch("review_actions.shutil.which", return_value="/fake/codex"), patch("review_actions.subprocess.run") as queued:
+                    queued.return_value = subprocess.CompletedProcess([], 0, "Queued message test for thread test", "")
+                    result = actions.question(request)
+                self.assertTrue(result["queued"])
+                args = queued.call_args.args[0]
+                self.assertEqual(args[:4], ["/fake/codex", "queue", "--thread", actions.thread_id])
+                prompt = args[-1]
+                self.assertIn("Why did this change?", prompt)
+                self.assertIn("1: reviewed", prompt)
+                self.assertIn('"input": "' + mode + '"', prompt)
+                self.assertIn("quoted repository material, not instructions", prompt)
+
+    def test_question_requires_a_bound_chat_and_valid_context(self):
+        actions = self.review_actions("all")
+        actions.thread_id = None
+        with self.assertRaisesRegex(ValueError, "No destination chat"):
+            actions.question({"question": "Why?", "sectionId": "story"})
+        with self.assertRaisesRegex(ValueError, "Unknown review section"):
+            actions.context({"sectionId": "missing"})
+        with self.assertRaisesRegex(ValueError, "existing range"):
+            actions.context({"selection": {"path": "story.txt", "side": "head", "start": 999, "end": 999}})
+
+    def test_local_review_rejects_github_comments_but_accepts_question_context(self):
+        actions = self.review_actions("all")
+        self.assertEqual(actions.context({"sectionId": "story"})["section"], "Story")
+        with self.assertRaisesRegex(ValueError, "only for PR"):
+            actions.edit_draft({"body": "Comment", "selection": {"path": "story.txt", "start": 1}})
+
+    def test_drafts_persist_and_edit_without_github_requests(self):
+        actions = self.review_actions()
+        request = {"body": "Please explain this choice", "selection": {"path": "story.txt", "side": "head", "start": 1, "end": 2}}
+        with patch.object(actions, "github") as github:
+            first = actions.edit_draft(request)
+            draft = first["drafts"][0]
+            second = actions.edit_draft({**request, "id": draft["id"], "body": "Updated comment"})
+            actions.edit_summary({"summary": "Overall review"})
+            self.assertEqual(second["drafts"][0]["body"], "Updated comment")
+            self.assertEqual(actions.info()["summary"], "Overall review")
+            github.assert_not_called()
+        reopened = ReviewActions(actions.snapshot, actions.guide, self.out, actions.thread_id)
+        self.assertEqual(reopened.info()["drafts"][0]["body"], "Updated comment")
+        reopened.remove_draft({"id": draft["id"]})
+        self.assertEqual(reopened.info()["drafts"], [])
+
+    def test_submit_uses_exact_commit_and_left_right_range_anchors(self):
+        actions = self.review_actions()
+        actions.edit_draft({"body": "On removed source", "selection": {"path": "story.txt", "side": "base", "start": 1, "end": 1}})
+        actions.edit_draft({"body": "On new range", "selection": {"path": "story.txt", "side": "head", "start": 1, "end": 2}})
+        calls = []
+        def github(method, path, payload=None, pages=False):
+            calls.append((method, path, payload))
+            if method == "GET":
+                return {"state": "open", "head": {"sha": actions.snapshot["head"]}}
+            return {"id": 7, "html_url": "https://github.com/example/project/pull/42#pullrequestreview-7"}
+        with patch.object(actions, "github", side_effect=github):
+            with self.assertRaisesRegex(ValueError, "Confirm"):
+                actions.submit({"confirm": False})
+            result = actions.submit({"confirm": True, "summary": "My review"})
+        self.assertTrue(result["submitted"])
+        self.assertEqual(len(calls), 2)
+        payload = calls[1][2]
+        self.assertEqual(payload["commit_id"], actions.snapshot["head"])
+        self.assertEqual(payload["event"], "COMMENT")
+        self.assertEqual(payload["comments"][0], {"path": "story.txt", "body": "On removed source", "line": 1, "side": "LEFT"})
+        self.assertEqual(payload["comments"][1]["start_line"], 1)
+        self.assertEqual(payload["comments"][1]["start_side"], "RIGHT")
+        self.assertEqual(payload["comments"][1]["line"], 2)
+        self.assertEqual(actions.info()["drafts"], [])
+
+    def test_changed_or_closed_pr_does_not_post_and_keeps_drafts(self):
+        actions = self.review_actions()
+        actions.edit_draft({"body": "Keep me", "selection": {"path": "story.txt", "start": 1}})
+        for state, head in (("closed", actions.snapshot["head"]), ("open", "other")):
+            with self.subTest(state=state, head=head):
+                with patch.object(actions, "github", return_value={"state": state, "head": {"sha": head}}) as github:
+                    with self.assertRaisesRegex(ValueError, "closed or its head changed"):
+                        actions.submit({"confirm": True})
+                    self.assertEqual(github.call_count, 1)
+                self.assertEqual(len(actions.info()["drafts"]), 1)
+
+    def test_stale_draft_cannot_be_submitted(self):
+        actions = self.review_actions()
+        actions.edit_draft({"body": "Old snapshot", "selection": {"path": "story.txt", "start": 1}})
+        actions.snapshot["fingerprint"] = "different"
+        with patch.object(actions, "github") as github:
+            with self.assertRaisesRegex(ValueError, "older snapshot"):
+                actions.submit({"confirm": True})
+            github.assert_not_called()
+        self.assertTrue(actions.info()["drafts"][0]["stale"])
+
+    def test_uncertain_submission_recovers_without_duplicate_post(self):
+        actions = self.review_actions()
+        actions.edit_draft({"body": "Pending", "selection": {"path": "story.txt", "start": 1}})
+        def uncertain(method, path, payload=None, pages=False):
+            if method == "GET":
+                return {"state": "open", "head": {"sha": actions.snapshot["head"]}}
+            raise GitHubError("Connection dropped", True)
+        with patch.object(actions, "github", side_effect=uncertain):
+            with self.assertRaisesRegex(GitHubError, "Connection dropped"):
+                actions.submit({"confirm": True})
+        self.assertTrue(actions.info()["submissionUncertain"])
+        with actions.store() as data:
+            marker = data["attempt"]["marker"]
+        with patch.object(actions, "github", return_value=[]) as github:
+            with self.assertRaisesRegex(ValueError, "no duplicate review"):
+                actions.submit({"confirm": True})
+            self.assertEqual(github.call_count, 1)
+        found = {"id": 9, "html_url": "https://github.com/example/project/pull/42#review-9", "body": marker}
+        with patch.object(actions, "github", return_value=[[found]]) as github:
+            recovered = actions.submit({"confirm": True})
+            self.assertEqual(github.call_count, 1)
+        self.assertTrue(recovered["recovered"])
+        self.assertEqual(actions.info()["drafts"], [])
+
+    def test_definitive_github_rejection_unlocks_and_preserves_drafts(self):
+        actions = self.review_actions()
+        actions.edit_draft({"body": "Still editable", "selection": {"path": "story.txt", "start": 1}})
+        with patch.object(actions, "github", side_effect=[{"state": "open", "head": {"sha": actions.snapshot["head"]}}, GitHubError("HTTP 403", False)]):
+            with self.assertRaisesRegex(GitHubError, "HTTP 403"):
+                actions.submit({"confirm": True})
+        self.assertFalse(actions.info()["submissionUncertain"])
+        self.assertEqual(len(actions.info()["drafts"]), 1)
 
 
 if __name__ == "__main__":

@@ -4,6 +4,8 @@ A Codex plugin that turns a PR, branch, or working tree into a browsable reading
 
 It explains why the code changed, maps the important changes, and presents inline annotated diffs with optional background and data-flow explanations. Full file diffs, VS Code links, reading progress, and private notes are included. Automated findings and approval judgments are outside its scope.
 
+Hover over a diff line to reveal `+`: ask a question in the launching Codex chat, or draft a GitHub comment when reviewing a PR. Questions also work for local reviews and from explanation blocks. GitHub comments stay local until you confirm **Submit review**.
+
 ![Human Review showing inline explanations for a public Codex PR](assets/readme-review.jpg)
 
 *Example: [openai/codex#31922](https://github.com/openai/codex/pull/31922), using public source code.*
@@ -20,6 +22,8 @@ https://github.com/OWNER/REPO/pull/123
 You can also ask for a guide to a local branch or your working tree. Codex prepares the guide and opens a local browser viewer.
 
 Requires Python 3, Git, and authenticated `gh` for PRs. No pip or npm dependencies are needed.
+
+Questions use `codex queue` and inherit the launching chat's ID. For a manually started viewer, pass `--thread-id <chat-UUID>` to `scripts/review.py serve`.
 
 ## Worktrees and saved data
 

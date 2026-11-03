@@ -16,6 +16,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlsplit
 import worktrees
+from review_actions import ReviewActions
 
 PLUGIN = Path(__file__).resolve().parents[1]
 
@@ -295,6 +296,7 @@ def editor_target(snapshot, out, path, side, line, use_checkout=True):
 def serve(args):
     out = Path(args.review).expanduser().resolve()
     snapshot, guide = load_review(out)
+    actions = ReviewActions(snapshot, guide, out, args.thread_id)
     lock = threading.Lock()
     session = worktrees.Session(out) if snapshot["mode"] == "pr" else None
     try:
@@ -336,6 +338,8 @@ def serve(args):
                     return self.send(200, {"snapshot": snapshot, "guide": guide})
                 if url.path == "/api/checkout":
                     return self.send(200, checkout_info())
+                if url.path == "/api/actions":
+                    return self.send(200, actions.info())
                 if url.path == "/api/cleanup-plan":
                     return self.send(200, worktrees.cleanup_unused(out.parent))
                 if url.path == "/api/state":
@@ -347,7 +351,7 @@ def serve(args):
                     target = editor_target(snapshot, out, params["path"][0], params.get("side", ["head"])[0], int(params.get("line", ["1"])[0]),
                                            use_checkout=snapshot["mode"] != "pr" or not session.handle.closed)
                     return self.send(200, target)
-                asset = {"/": "index.html", "/app.js": "app.js", "/style.css": "style.css"}.get(url.path)
+                asset = {"/": "index.html", "/app.js": "app.js", "/actions.js": "actions.js", "/style.css": "style.css"}.get(url.path)
                 if asset:
                     content_type = mimetypes.guess_type(asset)[0] or "application/octet-stream"
                     return self.send(200, (PLUGIN / "assets" / asset).read_bytes(), content_type)
@@ -357,11 +361,17 @@ def serve(args):
 
         def do_POST(self):
             nonlocal session
+            if self.headers.get("Host") not in (f"127.0.0.1:{self.server.server_port}", f"localhost:{self.server.server_port}"):
+                return self.send(403, {"error": "Local host only"})
             origin = self.headers.get("Origin")
             expected = f"http://{self.headers.get('Host')}"
             if origin != expected or self.headers.get("Sec-Fetch-Site") == "cross-site":
                 return self.send(403, {"error": "Same-origin requests only"})
-            if self.path not in ("/api/state", "/api/finish", "/api/checkout", "/api/cleanup") or self.headers.get("Content-Type") != "application/json":
+            action_routes = {"/api/context": actions.context, "/api/question": actions.question,
+                             "/api/draft": actions.edit_draft, "/api/draft/remove": actions.remove_draft,
+                             "/api/review-summary": actions.edit_summary,
+                             "/api/submit-review": actions.submit}
+            if self.path not in ("/api/state", "/api/finish", "/api/checkout", "/api/cleanup", *action_routes) or self.headers.get("Content-Type") != "application/json":
                 return self.send(400, {"error": "Expected JSON state"})
             try:
                 size = int(self.headers.get("Content-Length", "0"))
@@ -370,6 +380,8 @@ def serve(args):
                 state = json.loads(self.rfile.read(size))
                 if not isinstance(state, dict):
                     raise ValueError("State must be an object")
+                if self.path in action_routes:
+                    return self.send(200, action_routes[self.path](state))
                 if self.path != "/api/state":
                     if state.get("confirm") is not True:
                         raise ValueError("Explicit confirmation is required")
@@ -432,6 +444,8 @@ def main():
     serve_parser = commands.add_parser("serve")
     serve_parser.add_argument("review")
     serve_parser.add_argument("--port", type=int, default=0)
+    serve_parser.add_argument("--thread-id", default=os.environ.get("CODEX_THREAD_ID") or os.environ.get("CODEX_SESSION_ID"),
+                              help="Destination Codex chat UUID; defaults to the launching chat")
     serve_parser.set_defaults(action=serve)
     checkout_parser = commands.add_parser("checkout", help="Create or reuse the exact PR checkout")
     checkout_parser.add_argument("review")

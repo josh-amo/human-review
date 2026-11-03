@@ -1,6 +1,6 @@
 {
   "name": "human-review",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A browsable reading guide for human code review, with inline explanations, complete diffs, saved progress, and VS Code links.",
   "author": {
     "name": "Josh"
@@ -15,7 +15,7 @@
   "interface": {
     "displayName": "Human Review",
     "shortDescription": "Get to the important code, with the context to read it",
-    "longDescription": "Build a personal review document for a PR, branch, or working tree. Browse behavior changes, inline annotated diffs, optional background, and all changed files. Save reading progress and notes, then open exact source lines in VS Code. Designed for human understanding, without automated findings or verdicts. PR code browsing uses exact local worktrees with ownership tracking, safe reuse, and explicit cleanup that preserves your review notes.",
+    "longDescription": "Build a personal review document for a PR, branch, or working tree. Browse behavior changes, inline annotated diffs, optional background, and all changed files. Save reading progress and notes, then open exact source lines in VS Code. Designed for human understanding, without automated findings or verdicts. PR code browsing uses exact local worktrees with ownership tracking, safe reuse, and explicit cleanup that preserves your review notes. Ask contextual questions in the launching chat from any review, and draft PR comments for a separately confirmed GitHub review submission.",
     "developerName": "Josh",
     "category": "Productivity",
     "capabilities": [

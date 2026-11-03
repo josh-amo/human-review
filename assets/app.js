@@ -5,6 +5,7 @@ let snapshot, guide, state, view;
 let saveTimer, scrollTimer, queue = Promise.resolve(), rendering = false;
 let cleanupAction=null;
 let checkoutInfo=null;
+let reviewActions=null;
 const files = new Map();
 const esc = text => String(text ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const attr = esc;
@@ -54,7 +55,9 @@ function refsHtml(refs) { return refs?.length?`<div class="refs">${refs.map(r=>r
 function codeRow(row, path, highlight, sourceSide) {
   const number=(line,side)=>line==null?'':`<button class="line-number" data-editor="${fileKey(path)}" data-side="${side}" data-line="${line}" aria-label="Open ${side} line ${line} in VS Code">${line}</button>`;
   if(sourceSide) return `<div class="code-row ${highlight?'focus-line':''}" data-code-line="${row.new||row.old}" data-code-side="${sourceSide}">${number(row.new||row.old,sourceSide)}<span></span><code>${esc(row.text)}</code></div>`;
-  return `<div class="code-row ${row.kind} ${highlight?'focus-line':''}" data-new-line="${row.new||''}" data-old-line="${row.old||''}"><span>${number(row.old,'base')}</span><span>${number(row.new,'head')}</span><span>${row.kind==='add'?'+':row.kind==='remove'?'−':''}</span><code>${esc(row.text)}</code></div>`;
+  const side=row.kind==='remove'?'base':'head',line=side==='base'?row.old:row.new;
+  const action=line==null?'':`<button class="row-plus" data-ra="line" data-path="${fileKey(path)}" data-side="${side}" data-line="${line}" aria-label="Actions for ${attr(path)} ${side} line ${line}" title="Ask or comment · Shift-click another + to select a range">+</button>`;
+  return `<div class="code-row ${row.kind} ${highlight?'focus-line':''}" data-new-line="${row.new||''}" data-old-line="${row.old||''}"><span>${action}</span><span>${number(row.old,'base')}</span><span>${number(row.new,'head')}</span><span>${row.kind==='add'?'+':row.kind==='remove'?'−':''}</span><code>${esc(row.text)}</code></div>`;
 }
 
 function diffHtml(block, index, full=false) {
@@ -122,7 +125,7 @@ function render() {
   let html='';
   if(view.type==='section') {
     const index=guide.sections.findIndex(s=>s.id===view.id),section=guide.sections[index];
-    html=`<div class="chapter-top"><span>SECTION ${index+1} OF ${guide.sections.length}</span></div><h2>${esc(section.title)}</h2>${section.intro?`<p class="chapter-intro">${esc(section.intro)}</p>`:''}${section.origin?`<div class="origin">${esc(section.origin)}</div>`:''}${isChanged(section)?'<div class="stale">Changed since you looked. Your notes are preserved; mark as seen again after reading.</div>':''}${section.blocks.map(blockHtml).join('')}`;
+    html=`<div class="chapter-top"><span>SECTION ${index+1} OF ${guide.sections.length}</span></div><h2>${esc(section.title)}</h2>${section.intro?`<p class="chapter-intro">${esc(section.intro)}</p>`:''}${section.origin?`<div class="origin">${esc(section.origin)}</div>`:''}${isChanged(section)?'<div class="stale">Changed since you looked. Your notes are preserved; mark as seen again after reading.</div>':''}${section.blocks.map((block,i)=>`<section class="report-block" data-block-index="${i}">${blockHtml(block,i)}</section>`).join('')}`;
     if(section.map) html+=`<div class="block">${guide.sections.filter(s=>s.id!==section.id).map(s=>`<div class="map-item"><button data-section="${attr(s.id)}">${esc(s.title)}</button><p>${esc(s.subtitle||'')} · ${s.files.length} files</p></div>`).join('')}</div>`;
     if(section.supporting) html+=`<div class="supporting-index">${section.files.map(p=>`<button data-file="${fileKey(p)}" data-side="${files.get(p).head.exists?'head':'base'}">${esc(p)}</button>`).join('')}</div>`;
     html+=`<details class="notes" data-details="notes" ${state.expanded[`details:${view.id}:notes`]?'open':''}><summary>Private reading notes</summary><textarea id="notes" maxlength="20000" aria-label="Private reading notes" placeholder="Where did I stop? What should I revisit?">${esc(sectionState(section).notes||'')}</textarea></details><div class="chapter-bottom"><button ${index===0?'disabled':''} data-section="${attr(guide.sections[Math.max(0,index-1)].id)}">← Previous section</button><label class="seen-control"><input id="seen" type="checkbox" ${isSeen(section)?'checked':''}> Mark as seen</label><button ${index===guide.sections.length-1?'disabled':''} data-section="${attr(guide.sections[Math.min(guide.sections.length-1,index+1)].id)}">Next section →</button></div>`;
@@ -134,6 +137,7 @@ function render() {
     else html+=file[side].text===null?'<div class="empty">No text source exists on this side.</div>':`<div class="diff-tools"><span>Line numbers open VS Code</span><button data-file="${fileKey(file.path)}" data-line="${view.line||1}" data-side="${side}">Full file diff</button>${file.base.text!==null&&file.head.text!==null?`<button data-source="${fileKey(file.path)}" data-line="1" data-side="${side==='head'?'base':'head'}">Show ${side==='head'?'base':'head'} source</button>`:''}</div><div class="source">${lines.map((text,i)=>codeRow({text,new:i+1},file.path,i+1===Number(view.line),side)).join('')}</div>`;
   }
   byId('content').innerHTML=html;
+  reviewActions?.afterRender();
   if(view.type!=='section') showEditorTarget(view.path,view.side||'head',Number(view.line)||1);
   rendering=false;
 }
@@ -260,6 +264,7 @@ window.addEventListener('pagehide',()=>{if(state){capturePosition();state.view=v
     if(meta){byId('pr-link').hidden=false;byId('pr-link').href=meta.url;}
     byId('file-list').open=!!state.fileListOpen;
     if(guide.notice){byId('notice').textContent=guide.notice;byId('notice').hidden=false;}
+    reviewActions=await window.HumanReviewActions({snapshot,guide,api,esc,getView:()=>view,getReadingSpot:()=>state.readingSpot});
     render();if(view.type==='section'&&state.readingSpot?.id===view.id)requestAnimationFrame(()=>window.scrollTo(0,state.readingSpot.scroll||0));
   }catch(error){byId('title').textContent='Unable to open review';byId('content').textContent=error.message;}
 })();
