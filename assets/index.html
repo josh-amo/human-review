@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Human Review</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body>
+  <header class="app-header"><div><div class="eyebrow">HUMAN REVIEW</div><h1 id="title">Loading review…</h1><div id="comparison" class="subtle"></div></div><a id="pr-link" target="_blank" rel="noreferrer" hidden>Open PR ↗</a></header>
+  <div id="notice" class="notice" role="status" hidden></div>
+  <div class="checkout-toolbar" id="checkout-toolbar" hidden><span id="checkout-label"></span><div><button id="finish-review">Finish review & clean up…</button><button id="reopen-checkout" hidden>Reopen code checkout</button><button id="cleanup-unused">Clean up unused reviews…</button></div></div>
+  <dialog id="cleanup-dialog" aria-labelledby="cleanup-title"><h2 id="cleanup-title"></h2><p id="cleanup-description"></p><div id="cleanup-items"></div><div class="cleanup-actions"><button id="cancel-cleanup">Cancel</button><button id="confirm-cleanup">Confirm cleanup</button></div></dialog>
+  <div class="shell">
+    <aside class="sidebar"><h2>Your reading progress</h2><div id="progress-label" class="subtle" aria-live="polite"></div><progress id="progress" max="1" value="0"></progress><nav id="outline" aria-label="Guide outline"></nav><button id="resume" class="resume" hidden>Continue where you stopped</button><details id="file-list"><summary>All changed files</summary><div id="files"></div></details><p class="sidebar-foot">Personal reading progress.<br>Seen does not mean approved.<br><span id="save-status" role="status">Saved on this computer</span></p></aside>
+    <main id="reader"><div id="content"></div></main>
+  </div>
+</body>
+</html>
