@@ -50,7 +50,7 @@ python3 <plugin>/scripts/review.py validate <review-directory>
 python3 <plugin>/scripts/review.py serve <review-directory>
 ```
 
-Keep the server running. For a PR, starting the viewer creates or reuses its exact local checkout as described below; obtain sandbox access for that operation when needed. It binds only to loopback and prints its URL. Open that URL with the available browser tools, verify a section jump, a checkbox, a background disclosure, a full file diff, and editor target selection. Verify persistence by reloading. Mark the browser tab as a deliverable if the tool supports it. Share the actual clickable URL, not a screenshot pretending to be interactive. No product build is needed for preparing this reading guide.
+Keep the server running. For a PR, starting the viewer creates or reuses its exact local checkout as described below; obtain sandbox access for that operation when needed. It binds only to loopback and prints its URL. Share the actual clickable URL. No product build is needed for preparing this reading guide.
 
 The viewer saves personal progress, notes, expanded sections, and reading position to `state.json`. After regenerating a guide, sections with changed content or mapped files require rereading; notes remain. Full diffs retain every captured textual hunk, including generated and supporting changes. Binary and metadata-only changes remain listed with their available Git diff metadata. Source and diff line numbers link to VS Code. Each editor target is verified against the checkout at click time; a mismatch opens the exact base/head snapshot with an explicit label.
 
